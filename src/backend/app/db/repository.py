@@ -3,6 +3,9 @@ from app.db.database import get_collection
 from bson import ObjectId
 from typing import Type, TypeVar, Generic, List, Optional
 from pydantic import BaseModel
+import logging
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -12,14 +15,32 @@ class BaseRepository(Generic[T]):
         self.model = model
 
     async def _get_collection(self) -> AsyncIOMotorCollection:
-        return await get_collection(self.collection_name)
+        logger.info(f"Getting collection: {self.collection_name}")
+        try:
+            collection = await get_collection(self.collection_name)
+            logger.info(f"Successfully obtained collection: {self.collection_name}")
+            return collection
+        except Exception as e:
+            logger.error(f"Failed to get collection {self.collection_name}: {str(e)}")
+            logger.error(f"Collection error type: {type(e).__name__}")
+            raise
 
     async def get(self, id: str) -> Optional[T]:
-        collection = await self._get_collection()
-        document = await collection.find_one({"_id": ObjectId(id)})
-        if document:
-            return self.model(**document)
-        return None
+        logger.info(f"Getting document with id: {id} from collection: {self.collection_name}")
+        try:
+            collection = await self._get_collection()
+            logger.info(f"Performing find_one operation for id: {id}")
+            document = await collection.find_one({"_id": ObjectId(id)})
+            if document:
+                logger.info(f"Document found for id: {id}")
+                return self.model(**document)
+            else:
+                logger.warning(f"No document found for id: {id}")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get document {id} from {self.collection_name}: {str(e)}")
+            logger.error(f"Get error type: {type(e).__name__}")
+            raise
 
     async def get_all(self) -> List[T]:
         collection = await self._get_collection()
@@ -31,11 +52,19 @@ class BaseRepository(Generic[T]):
         return data
 
     async def update(self, id: str, data: BaseModel) -> Optional[T]:
-        collection = await self._get_collection()
-        await collection.update_one(
-            {"_id": ObjectId(id)}, {"$set": data.model_dump(exclude_unset=True)}
-        )
-        return await self.get(id)
+        logger.info(f"Updating document with id: {id} in collection: {self.collection_name}")
+        try:
+            collection = await self._get_collection()
+            logger.info(f"Performing update operation for id: {id}")
+            result = await collection.update_one(
+                {"_id": ObjectId(id)}, {"$set": data.model_dump(exclude_unset=True)}
+            )
+            logger.info(f"Update operation completed. Modified count: {result.modified_count}")
+            return await self.get(id)
+        except Exception as e:
+            logger.error(f"Failed to update document {id} in {self.collection_name}: {str(e)}")
+            logger.error(f"Update error type: {type(e).__name__}")
+            raise
 
     async def delete(self, id: str) -> bool:
         collection = await self._get_collection()
